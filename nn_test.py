@@ -79,9 +79,9 @@ class NeuralNetwork():
         return oneHotEncoded
 
     def dropout(self, x, dropout_rate):
-    mask = np.random.binomial(1, 1 - dropout_rate, size=x.shape) / (1 - dropout_rate)
-    self.dropout_masks.append(mask)
-    return x * mask
+        mask = np.random.binomial(1, 1 - dropout_rate, size=x.shape) / (1 - dropout_rate)
+        self.dropout_masks.append(mask)
+        return x * mask
 
         
     def cost(self, label, output):
