@@ -144,14 +144,11 @@ class NeuralNetwork():
                 z2 = np.dot(a1, self.w2) + self.b2
                 #feeding into activation function again
                 a2 = self.activation(z2, activationFunc)
-                #a2 = self.softmax(z2)
                 
 
 
                 ''' Softmax, then Cost/loss '''
                 smOutput = self.softmax(a2)
-                #loss = self.crossEntropyLoss(label, smOutput)
-                #loss = self.crossEntropyLoss(label, a2)
                 correct += int(np.argmax(a2) == np.argmax(label))
                 
                 ''' Back prop '''
