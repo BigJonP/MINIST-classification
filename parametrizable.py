@@ -1,11 +1,9 @@
-#importing libraries
 import logging
 import random
 import math
 import matplotlib.pyplot as plt
 import numpy as np
 
-#importing data
 from data_utils import *
 
 
@@ -15,34 +13,23 @@ trainingLabels = np.array(load_labels("train-labels-idx1-ubyte.gz"))
 testImages = np.array(load_images("t10k-images-idx3-ubyte.gz"))
 testLabels = np.array(load_labels("t10k-labels-idx1-ubyte.gz"))
 
-'''
-trainImages is 60,000 images/elements,
-with each element itself being an array of length 784 (all pixels of a 28x28 image),
-with each element in that array being a number 0 - 255 representing pixel brightness
-For trainImages to be dot multiplied, it needs to be turned into a numpy array
-'''
+class CustomNN:
+    def __init__(self, input_size, hidden_layers, units_per_layer, activation_functions):
+        self.input_size = input_size
+        self.hidden_layers = hidden_layers
+        self.units_per_layer = units_per_layer
+        self.activation_functions = activation_functions
+        self.weights = []
+        self.biases = []
+        self.init_weights_and_biases()
 
-#Seed for reproducibility of RNG
-seed = 1
-np.random.seed(seed)
-random.seed(seed)
+    def init_weights_and_biases(self):
+        layer_sizes = [self.input_size] + self.units_per_layer
 
-
-class NeuralNetwork():
-    def __init__(self, layer_sizes, activation_funcs):
-        # Initializing the network with customizable layers and activation functions
-        self.layer_sizes = layer_sizes
-        self.activation_funcs = activation_funcs
-        self.dropout_masks = []  # To store dropout masks for each layer
-
-        #generate weights
-        self.w1 = 2 * np.random.rand(784, 16) - 1 
-        self.w2 = 2 * np.random.rand(16, 10) - 1 
-        #generate biases    
-        self.b1 = 2 * np.random.rand(1, 16) - 1
-        self.b2 = 2 * np.random.rand(1, 10) - 1
-    
-    
+        for i in range(len(layer_sizes) - 1):
+            self.weights.append(np.random.randn(layer_sizes[i], layer_sizes[i + 1]) * 0.01)
+            self.biases.append(np.zeros((1, layer_sizes[i + 1])))
+            
     def activation(self, x, af):
         if af == "1":
             #Sigmoid
@@ -59,7 +46,7 @@ class NeuralNetwork():
         elif af == "2":
             #ReLU derivative
             return (x >= 0) * 1
-    
+        
     def softmax(self, x):
         return np.exp(x) / np.sum(np.exp(x))
     
@@ -79,7 +66,7 @@ class NeuralNetwork():
             oneHotEncoded[x, label] = 1
         
         return oneHotEncoded
-
+    
     def dropout(self, x, dropout_rate):
         mask = np.random.binomial(1, 1 - dropout_rate, size=x.shape) / (1 - dropout_rate)
         self.dropout_masks.append(mask)
@@ -96,39 +83,8 @@ class NeuralNetwork():
     def crossEntropyLoss(self, actual, predicted):
         #actual value/label needs to be one-hot encoded
         loss = -np.sum(actual * np.log(predicted))
-        return loss    
-
-    #create plots to compare different hyperparameters
-    def plot_metrics(self, gradients, epoch_accuracies, epochs, activationChoice, learningRate):
-        # just copying what's done in nn.fit
-        layer1Grads, layer2Grads, w1Mags, w2Mags, a1Log, a2Log = gradients
-        
-        #add extra details in about the training
-        activation_name = "Sigmoid" if activationChoice == "1" else "ReLU"
-        #set up the plotting environment
-        fig, axs = plt.subplots(3, 2, figsize=(15, 15))
-        fig.suptitle(f'Training Metrics Over {epochs} Epochs\nActivation: {activation_name}, Learning Rate: {learningRate}')
-
-        #plot accuracy per epoch, this is probably what we're most interested in
-        axs[0, 0].plot(range(epochs), epoch_accuracies)
-        axs[0, 0].set_title('Accuracy per Epoch')
-        axs[0, 0].set_xlabel('Epoch')
-        axs[0, 0].set_ylabel('Accuracy')
-
-        #plot layer gradients, weights magnitudes, and activations? not sure if this is necessary but i guess ill add it anyway
-        axs[0, 1].plot(layer1Grads, label='Layer 1 Gradients')
-        axs[1, 0].plot(layer2Grads, label='Layer 2 Gradients')
-        axs[1, 1].plot(w1Mags, label='Weights 1 Magnitudes')
-        axs[2, 0].plot(w2Mags, label='Weights 2 Magnitudes')
-        axs[2, 1].plot(a1Log, label='Activations 1 Log')
-        axs[2, 1].plot(a2Log, label='Activations 2 Log')
-
-        for ax in axs.flat:
-            ax.label_outer()
-            ax.legend()
-
-        plt.show()
-                
+        return loss 
+    
     def fit (self, lr, epochs, trainImg, trainLabels, activationFunc, dropout_rate=0.0):
         
         #required for cost/loss 
@@ -230,14 +186,14 @@ class NeuralNetwork():
             
             print("epoch: ", epoch)
             print(f"Accuracy: {round((correct / trainImg.shape[0]) * 100, 2)}%")
-            epoch_accuracies[epoch] = round((correct/trainImg.shape[0]) * 100,2)
+            #epoch_accuracies[epoch] = round((correct/trainImg.shape[0]) * 100,2)
             #reset so the accuracy is determined based on each epoch
             correct = 0
         
         #training returns gradients for plotting graphs
         print("overallCycleNum: ", overallCycleNum)
         gradients = np.array([layer1Grads, layer2Grads, w1Mags, w2Mags, a1Log, a2Log])
-        self.plot_metrics(gradients, epoch_accuracies, epochs, activationChoice, learningRate)
+        #self.plot_metrics(gradients, epoch_accuracies, epochs, activationChoice, learningRate)
         return gradients
         
     def predict(self, x, activationFunc):
@@ -247,100 +203,3 @@ class NeuralNetwork():
         a2 = self.activation(z2, activationFunc)
         sm = self.softmax(a2)
         return sm
-    
-    
-
-
-
-nn = NeuralNetwork([786,16,10],"1")
-activationChoice = "1" #input("Choose an activation function\n 1 - Sigmoid\n 2 - ReLU")
-learningRate = 0.5 #input("Enter a learning rate")
-epochs = 50 #input("Enter number of epochs")
-
-#converts image pixel values from 0 - 255 to 0 - 1 range, avoiding overflow from activation function
-trainingImages = trainingImages / 255 
-
-'''
-#testing for sigmoid and derivative, create range of values from -10 to 10
-plotVal = np.linspace(-10, 10, 200)
-#run values through sigmoid and derivative
-plot_sigmoid_values = [nn.activation(x, "1") for x in plotVal]
-plot_sigmoid_derivative_values = [nn.activationDerivatiive(x, "1") for x in plotVal]
-#relu plot values, same thing as above
-plot_relu_values = [nn.activation(x, "2") for x in plotVal]
-plot_relu_derivative_values =[nn.activationDerivatiive(x, "2") for x in plotVal]
-
-
-plot_softmax_probabilities = nn.softmax(plotVal)
-
-#create plots for both functions
-plt.figure(figsize=(12, 5))
-
-#sigmoid plot
-plt.subplot(1, 2, 1)
-plt.plot(plotVal, plot_sigmoid_values, label="Sigmoid")
-plt.title("Sigmoid Function")
-plt.xlabel("Input")
-plt.ylabel("Output")
-plt.grid(True)
-plt.legend()
-#backprop sigmoid plot
-plt.subplot(1, 2, 2)
-plt.plot(plotVal, plot_sigmoid_derivative_values, label="Sigmoid Derivative")
-plt.title("Sigmoid derivative function")
-plt.xlabel("Input")
-plt.ylabel("Derivative")
-plt.grid(True)
-plt.legend()
-
-#relu plot
-plt.subplot(1, 2, 1)
-plt.plot(plotVal, plot_relu_values, label="ReLU")
-plt.title("ReLU function")
-plt.xlabel("Input")
-plt.ylabel("Output")
-plt.grid(True)
-plt.legend()
-#relu backprop plot
-plt.subplot(1, 2, 2)
-plt.plot(plotVal, plot_relu_derivative_values, label="ReLU Derivative")
-plt.title("ReLU derivative function")
-plt.xlabel("Input")
-plt.ylabel("Derivative")
-plt.grid(True)
-plt.legend()
-#show plots
-plt.tight_layout()
-plt.show()
-
-x = np.linspace(-10, 10, 100)
-y = nn.softmax(x)
-plt.scatter(x, y) 
-plt.title('Softmax Function') 
-plt.show()
-'''
-#training returns gradients for plotting graphs
-print("training in progress...")
-gradients = nn.fit(learningRate, epochs, trainingImages, trainingLabels, activationChoice)
-print("training complete")
-
-
-
-
-while True:
-    index = int(input("Enter a number between 0 - 59999: "))
-    yHat = nn.predict(trainingImages, activationChoice)
-    print("prediction: ", yHat[index].argmax(), " | ", yHat[index])
-    print("actual: ", trainingLabels[index], " | ", nn.oneHotEncode(trainingLabels)[index])
-
-
-
-'''
-Trying to match with example Lab solution, trying to do all images at once instead of loop method
-x:  (5, 3) | trainingImages is (60000, 784) 
-y:  (1, 5) [transpose to (5, 1)] | trainingLabels is (60000,) [converts to (60000, 10)]
-w1: (3, 4) | (784, 16) 
-z1: (5, 3) x (3, 4) = (5, 4) | (60000, 784) x (784, 16) = (60000, 16) | (1, 784) x (784, 16) = (1, 16)
-w2: (4, 1) | (16, 10) | (16, 10) x (10, 10) = (16, 10) 
-z2: (5, 4) x (4, 1) = (5, 1) | (60000, 16) x (16, 10) = (60000, 10) 
-'''
