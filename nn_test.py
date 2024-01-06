@@ -80,10 +80,14 @@ class NeuralNetwork():
         
         return oneHotEncoded
 
-    def dropout(self, x, dropout_rate):
-        mask = np.random.binomial(1, 1 - dropout_rate, size=x.shape) / (1 - dropout_rate)
-        self.dropout_masks.append(mask)
-        return x * mask
+    def dropout(self, x, dropout_rate, is_training=True):
+        if is_training:
+            # Inverted dropout mask
+            mask = np.random.binomial(1, 1 - dropout_rate, size=x.shape) / (1 - dropout_rate)
+            self.dropout_masks.append(mask)
+            return x * mask
+        else:
+            return x  # No change to the input during testing
 
         
     def cost(self, label, output):
@@ -97,6 +101,8 @@ class NeuralNetwork():
         #actual value/label needs to be one-hot encoded
         loss = -np.sum(actual * np.log(predicted))
         return loss    
+    
+    
 
     #create plots to compare different hyperparameters
     def plot_metrics(self, gradients, epoch_accuracies, epochs, activationChoice, learningRate):
@@ -129,7 +135,7 @@ class NeuralNetwork():
 
         plt.show()
                 
-    def fit (self, lr, epochs, trainImg, trainLabels, activationFunc, dropout_rate=0.0):
+    def fit (self, lr, epochs, trainImg, trainLabels, activationFunc, dropout_rate=0.0, optimizer="sgd", momentum=0.9):
         
         #required for cost/loss 
         oneHotLabels = self.oneHotEncode(trainLabels)
@@ -149,6 +155,13 @@ class NeuralNetwork():
         w2Mags = np.zeros((numCycles,1))
         a1Log = np.zeros((numCycles,1))
         a2Log = np.zeros((numCycles,1))
+        
+        
+        # Initialize velocity for momentum
+        v_w1 = np.zeros(self.w1.shape)
+        v_w2 = np.zeros(self.w2.shape)
+        v_b1 = np.zeros(self.b1.shape)
+        v_b2 = np.zeros(self.b2.shape)
         
         #keep track of accuracies over epochs
         epoch_accuracies = np.zeros(epochs)
@@ -174,12 +187,13 @@ class NeuralNetwork():
                 z1 = np.dot(img.T, self.w1) + self.b1
                 #feeding z1 into activation function for non-linearity
                 a1 = self.activation(z1, activationFunc)
-                
+                a1 = self.dropout(a1, dropout_rate, is_training=True)  # Apply dropout after activation
                 #hidden layer to output layer - dot multiplication of weights with output of first layer + bias
                 z2 = np.dot(a1, self.w2) + self.b2
                 #feeding into activation function again
                 a2 = self.activation(z2, activationFunc)
-                
+                a2 = self.dropout(a2, dropout_rate, is_training=True)  # Apply dropout after activation
+
 
 
                 ''' Softmax, then Cost/loss '''
@@ -196,6 +210,7 @@ class NeuralNetwork():
                 #da1/dz1 = w2
                 da1 = da2.dot(self.w2.T) * self.activationDerivatiive(z1, activationFunc)
 
+                '''
                 #--Updating Weights and Biases--
 
                 #dL/dw2 = da2 * dz2/dw2
@@ -214,7 +229,12 @@ class NeuralNetwork():
                 #dL/db1 = delta a1 * dz1/db1
                 #dz1/db1 = 1
                 self.b1 -= lr * da1
-
+                '''
+                # Update weights and biases
+                if optimizer == "sgd":
+                    self._update_parameters_sgd(lr, da1, da2, img, a1)
+                elif optimizer == "sgd_momentum":
+                    self._update_parameters_sgd_momentum(lr, da1, da2, img, a1, v_w1, v_w2, v_b1, v_b2, momentum)
                 #the total number of iterations of the training loop is the number of images * epochs
                 #imgCycle is the current image training cycle within the greater for-loop of epochs
                 overallCycleNum = (numImages * epoch) + imgCycle
@@ -240,6 +260,27 @@ class NeuralNetwork():
         self.plot_metrics(gradients, epoch_accuracies, epochs, activationChoice, learningRate)
         return gradients
         
+    
+    def _update_parameters_sgd(self, lr, da1, da2, img, a1):
+        self.w2 -= lr * a1.T.dot(da2)
+        self.b2 -= lr * da2
+        self.w1 -= lr * img.dot(da1)
+        self.b1 -= lr * da1
+
+    def _update_parameters_sgd_momentum(self, lr, da1, da2, img, a1, v_w1, v_w2, v_b1, v_b2, momentum):
+        # Update with momentum
+        v_w2 = momentum * v_w2 + lr * a1.T.dot(da2)
+        self.w2 -= v_w2
+
+        v_b2 = momentum * v_b2 + lr * da2
+        self.b2 -= v_b2
+
+        v_w1 = momentum * v_w1 + lr * img.dot(da1)
+        self.w1 -= v_w1
+
+        v_b1 = momentum * v_b1 + lr * da1
+        self.b1 -= v_b1
+    
     def predict(self, x, activationFunc):
         z1 = np.dot(x, self.w1) + self.b1
         a1 = self.activation(z1, activationFunc)
@@ -254,8 +295,8 @@ class NeuralNetwork():
 
 nn = NeuralNetwork([786,16,10],"1")
 activationChoice = "1" #input("Choose an activation function\n 1 - Sigmoid\n 2 - ReLU")
-learningRate = 0.5 #input("Enter a learning rate")
-epochs = 50 #input("Enter number of epochs")
+learningRate = 0.2 #input("Enter a learning rate")
+epochs = 2 #input("Enter number of epochs")
 
 #converts image pixel values from 0 - 255 to 0 - 1 range, avoiding overflow from activation function
 trainingImages = trainingImages / 255 
@@ -321,7 +362,7 @@ plt.show()
 '''
 #training returns gradients for plotting graphs
 print("training in progress...")
-gradients = nn.fit(learningRate, epochs, trainingImages, trainingLabels, activationChoice)
+gradients = nn.fit(learningRate, epochs, trainingImages, trainingLabels, activationChoice, optimizer="sgd")
 print("training complete")
 
 
