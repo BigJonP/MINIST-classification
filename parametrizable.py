@@ -15,20 +15,29 @@ testLabels = np.array(load_labels("t10k-labels-idx1-ubyte.gz"))
 
 class CustomNN:
     def __init__(self, input_size, hidden_layers, units_per_layer, activation_functions):
+        if hidden_layers != len(units_per_layer) or hidden_layers + 1 != len(activation_functions):
+            raise ValueError("Length of units_per_layer must be equal to hidden_layers, and activation_functions must be one more than hidden_layers")
+
         self.input_size = input_size
         self.hidden_layers = hidden_layers
         self.units_per_layer = units_per_layer
         self.activation_functions = activation_functions
         self.weights = []
         self.biases = []
+        
         self.init_weights_and_biases()
 
+    #trying out xavier initialisation for a dynamic number of hidden layers
     def init_weights_and_biases(self):
+        #including the input layer size in the layer_sizes list
         layer_sizes = [self.input_size] + self.units_per_layer
 
         for i in range(len(layer_sizes) - 1):
-            self.weights.append(np.random.randn(layer_sizes[i], layer_sizes[i + 1]) * 0.01)
-            self.biases.append(np.zeros((1, layer_sizes[i + 1])))
+            #xavier initialisation for weights
+            weight = np.random.randn(layer_sizes[i], layer_sizes[i + 1]) * np.sqrt(2 / (layer_sizes[i] + layer_sizes[i + 1]))
+            bias = np.zeros((1, layer_sizes[i + 1]))
+            self.weights.append(weight)
+            self.biases.append(bias)
             
     def activation(self, x, af):
         if af == "1":
@@ -38,6 +47,13 @@ class CustomNN:
             #ReLU
             return x * (x > 0)
     
+    def sigmoid(self,x):
+        return 1/(1+np.exp(-x))
+    
+    def ReLU(self,x):
+        return x * (x > 0)
+    
+    
     def activationDerivatiive(self, x, af):
         if af == "1":
             #Sigmoid derivative
@@ -46,6 +62,13 @@ class CustomNN:
         elif af == "2":
             #ReLU derivative
             return (x >= 0) * 1
+        
+    def sigmoid_derivative(self,x):
+        s = 1 / (1 + np.exp(-x))
+        return s * (1.0 - s)
+    
+    def ReLU_derivative(self,x):
+        return (x >= 0) * 1
         
     def softmax(self, x):
         return np.exp(x) / np.sum(np.exp(x))
@@ -85,121 +108,96 @@ class CustomNN:
         loss = -np.sum(actual * np.log(predicted))
         return loss 
     
-    def fit (self, lr, epochs, trainImg, trainLabels, activationFunc, dropout_rate=0.0):
+    def forward_prop(self, img):
+        activations = [img]
+        for i in range(len(self.weights)):
+            z = np.dot(activations[-1], self.weights[i]) + self.biases[i]
+            if self.activation_functions[i] == 'sigmoid':
+                activation = self.sigmoid(z)
+            elif self.activation_functions[i] == 'relu':
+                activation = self.ReLU(z)
+            elif self.activation_functions[i] == 'softmax':
+                activation = self.softmax(z)
+            activations.append(activation)
+        return activations
+    
+    def back_prop(self, error, activations):
+        gradients = [error * self.softmaxDerivative(activations[-1])]
         
-        #required for cost/loss 
+        #loop through layers in reverse order starting from the second last layer
+        for i in range(len(self.weights) - 1, 0, -1):
+            if self.activation_functions[i - 1] == 'sigmoid':
+                delta = np.dot(gradients[-1], self.weights[i].T) * self.sigmoid_derivative(activations[i])
+            elif self.activation_functions[i - 1] == 'relu':
+                delta = np.dot(gradients[-1], self.weights[i].T) * self.ReLU_derivative(activations[i])
+            gradients.append(delta)
+
+        #reverse gradients to match the order of the layers
+        gradients.reverse()
+
+        return gradients
+    
+    
+    
+    def fit(self, lr, epochs, trainImg, trainLabels, dropout_rate=0.0):
         oneHotLabels = self.oneHotEncode(trainLabels)
+        numImages, _ = oneHotLabels.shape
 
-        #Extracting number of rows from oneHotLabels because that's the number of images
-        numImages, columns = oneHotLabels.shape
-        #Number of cycles required to create array to plot graph showing change in gradient
-        numCycles  = numImages * epochs
-
-        #Required to ensure the change in gradient matches with the current cycle of the training loop
-        overallCycleNum = 0
-
-        #empty arrays the size of the total cycles required for training, to store outputs for graphs
-        layer1Grads = np.zeros((numCycles,1))
-        layer2Grads = np.zeros((numCycles,1))
-        w1Mags = np.zeros((numCycles,1))
-        w2Mags = np.zeros((numCycles,1))
-        a1Log = np.zeros((numCycles,1))
-        a2Log = np.zeros((numCycles,1))
-        
-        #keep track of accuracies over epochs
-        epoch_accuracies = np.zeros(epochs)
-
-        #the number of times the NN correctly identifies a number during training
-        correct = 0    
-        
-        for epoch in range (0, epochs):
-            #Count of the current image being processed in the following for-loop
-            #Required to plot graph
-            imgCycle = 0
+        for epoch in range(epochs):
+            correct = 0  #to track the number of correct predictions
 
             for img, label in zip(trainImg, oneHotLabels):
-                #Changing shape of img and label so they can be dot multipled
-                img.shape += (1,)
-                label.shape += (1,)
+                img = img.reshape((1, -1))  #reshaping the image to be a row vector
+                label = label.reshape((1, -1))  #reshaping the label to be a row vector
 
-                #incrementing imgCycle so the gradients for the graphs are plotted in the correct positions
-                imgCycle += 1
+                #forwardpropagation
+                activations = self.forward_prop(img)
 
-                ''' Forward prop '''
-                #input layer to hidden layer - matrix dot multiplication of weights with input layer + bias
-                z1 = np.dot(img.T, self.w1) + self.b1
-                #feeding z1 into activation function for non-linearity
-                a1 = self.activation(z1, activationFunc)
-                
-                #hidden layer to output layer - dot multiplication of weights with output of first layer + bias
-                z2 = np.dot(a1, self.w2) + self.b2
-                #feeding into activation function again
-                a2 = self.activation(z2, activationFunc)
-                
+                #calculating the error
+                error = label - activations[-1]
+
+                #backward propagation
+                gradients = self.back_prop(error, activations)
+
+                #update weights and biases
+                for i in range(len(self.weights)):
+                    self.weights[i] += lr * np.dot(activations[i].T, gradients[i])
+                    self.biases[i] += lr * gradients[i]
+
+                #check for correct prediction
+                if np.argmax(activations[-1]) == np.argmax(label):
+                    correct += 1
+
+            accuracy = correct / numImages
+            print(f"Epoch {epoch + 1}/{epochs}, Accuracy: {accuracy:.2f}")
+
+input_size = 784  #for 28x28 pixel images
+hidden_layers = 2
+units_per_layer = [128, 10]  #two hidden layers with 128 and 64 neurons
+activation_functions = ['relu', 'relu', 'softmax']  #activation functions for each layer including the output layer
+
+nn = CustomNN(input_size, hidden_layers, units_per_layer, activation_functions) 
+   
+
+activationChoice = "1" #input("Choose an activation function\n 1 - Sigmoid\n 2 - ReLU")
+learningRate = 0.2 #input("Enter a learning rate")
+epochs = 5 #input("Enter number of epochs")
+
+#converts image pixel values from 0 - 255 to 0 - 1 range, avoiding overflow from activation function
+trainingImages = trainingImages / 255 
+
+#training returns gradients for plotting graphs
+print("training in progress...")
+gradients = nn.fit(learningRate, epochs, trainingImages, trainingLabels, activationChoice)
+print("training complete")
 
 
-                ''' Softmax, then Cost/loss '''
-                smOutput = self.softmax(a2)
-                correct += int(np.argmax(a2) == np.argmax(label))
-                
-                ''' Back prop '''
-                #delta a2 = dL/dS * dS/da2 * da2/dz2
-                #dL/dS = cross entropy loss derivative = (smOutput - label.T)
-                #dS/da2 = softmax derivative
-                da2 = (smOutput - label.T) * self.activationDerivatiive(z2, activationFunc)
 
-                #delta a1 = delta a2 * dz2/da1 * da1/dz1
-                #da1/dz1 = w2
-                da1 = da2.dot(self.w2.T) * self.activationDerivatiive(z1, activationFunc)
 
-                #--Updating Weights and Biases--
+while True:
+    index = int(input("Enter a number between 0 - 59999: "))
+    yHat = nn.predict(trainingImages, activationChoice)
+    print("prediction: ", yHat[index].argmax(), " | ", yHat[index])
+    print("actual: ", trainingLabels[index], " | ", nn.oneHotEncode(trainingLabels)[index])
 
-                #dL/dw2 = da2 * dz2/dw2
-                #da2 = dL/da2 * da2/dz2
-                #dz2/dw2 = a1
-                self.w2 -= lr * a1.T.dot(da2)
 
-                #dL/db2 = da2 * dz2/db2
-                #dz2/db2 = 1
-                self.b2 -= lr * da2
-
-                #dL/dw1 = delta a1 * dz1/dw1
-                #dz1/dw1 = trainImg
-                self.w1 -= lr * img.dot(da1)
-                
-                #dL/db1 = delta a1 * dz1/db1
-                #dz1/db1 = 1
-                self.b1 -= lr * da1
-
-                #the total number of iterations of the training loop is the number of images * epochs
-                #imgCycle is the current image training cycle within the greater for-loop of epochs
-                overallCycleNum = (numImages * epoch) + imgCycle
-
-                #gradient values updated
-                if overallCycleNum < numCycles:
-                    layer1Grads[overallCycleNum] = np.sum(img.dot(da1))
-                    layer2Grads[overallCycleNum] = np.sum(a1.T.dot(da2))
-                    w1Mags[overallCycleNum] = np.sum(np.absolute(self.w1))
-                    w2Mags[overallCycleNum] = np.sum(np.absolute(self.w2))
-                    a1Log[overallCycleNum] = np.mean(a1)
-                    a2Log[overallCycleNum] = np.mean(a2)
-            
-            print("epoch: ", epoch)
-            print(f"Accuracy: {round((correct / trainImg.shape[0]) * 100, 2)}%")
-            #epoch_accuracies[epoch] = round((correct/trainImg.shape[0]) * 100,2)
-            #reset so the accuracy is determined based on each epoch
-            correct = 0
-        
-        #training returns gradients for plotting graphs
-        print("overallCycleNum: ", overallCycleNum)
-        gradients = np.array([layer1Grads, layer2Grads, w1Mags, w2Mags, a1Log, a2Log])
-        #self.plot_metrics(gradients, epoch_accuracies, epochs, activationChoice, learningRate)
-        return gradients
-        
-    def predict(self, x, activationFunc):
-        z1 = np.dot(x, self.w1) + self.b1
-        a1 = self.activation(z1, activationFunc)
-        z2 = np.dot(a1, self.w2) + self.b2
-        a2 = self.activation(z2, activationFunc)
-        sm = self.softmax(a2)
-        return sm
