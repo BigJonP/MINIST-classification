@@ -25,6 +25,10 @@ seed = 1
 np.random.seed(seed)
 random.seed(seed)
 
+layer_sizes = [784, 16, 10]  # Example: Input layer, one hidden layer, output layer
+activation_funcs = ["1", "1"]  # Assuming "1" is for Sigmoid
+
+
 
 class NeuralNetwork():
     def __init__(self, layer_sizes, activation_funcs):
@@ -77,11 +81,15 @@ class NeuralNetwork():
             oneHotEncoded[x, label] = 1
         
         return oneHotEncoded
+    def dropout(self, x, dropout_rate, is_training=True):
+        if is_training:
+            # Inverted dropout mask
+            mask = np.random.binomial(1, 1 - dropout_rate, size=x.shape) / (1 - dropout_rate)
+            self.dropout_masks.append(mask)
+            return x * mask
+        else:
+            return x  # No change to the input during testing
 
-    def dropout(self, x, dropout_rate):
-        mask = np.random.binomial(1, 1 - dropout_rate, size=x.shape) / (1 - dropout_rate)
-        self.dropout_masks.append(mask)
-        return x * mask
 
         
     def cost(self, label, output):
@@ -97,7 +105,7 @@ class NeuralNetwork():
         return loss    
 
                 
-    def fit (self, lr, epochs, trainImg, trainLabels, activationFunc, dropout_rate=0.0):
+    def fit (self, lr, epochs, trainImg, trainLabels, activationFunc, dropout_rate=0.0, optimizer="sgd", momentum=0.9):
         
         #required for cost/loss 
         oneHotLabels = self.oneHotEncode(trainLabels)
@@ -120,6 +128,13 @@ class NeuralNetwork():
 
         #the number of times the NN correctly identifies a number during training
         correct = 0    
+
+        # Initialize velocity for momentum
+        v_w1 = np.zeros(self.w1.shape)
+        v_w2 = np.zeros(self.w2.shape)
+        v_b1 = np.zeros(self.b1.shape)
+        v_b2 = np.zeros(self.b2.shape)
+
         
         for epoch in range (0, epochs):
             #Count of the current image being processed in the following for-loop
@@ -134,17 +149,15 @@ class NeuralNetwork():
                 #incrementing imgCycle so the gradients for the graphs are plotted in the correct positions
                 imgCycle += 1
 
-                ''' Forward prop '''
-                #input layer to hidden layer - matrix dot multiplication of weights with input layer + bias
+
+        # Forward prop
                 z1 = np.dot(img.T, self.w1) + self.b1
-                #feeding z1 into activation function for non-linearity
                 a1 = self.activation(z1, activationFunc)
-                
-                #hidden layer to output layer - dot multiplication of weights with output of first layer + bias
+                a1 = self.dropout(a1, dropout_rate, is_training=True)  # Apply dropout after activation
+
                 z2 = np.dot(a1, self.w2) + self.b2
-                #feeding into activation function again
                 a2 = self.activation(z2, activationFunc)
-                
+                a2 = self.dropout(a2, dropout_rate, is_training=True)  # Apply dropout after activation
 
 
                 ''' Softmax, then Cost/loss '''
@@ -180,6 +193,12 @@ class NeuralNetwork():
                 #dz1/db1 = 1
                 self.b1 -= lr * da1
 
+                # Update weights and biases
+                if optimizer == "sgd":
+                    self._update_parameters_sgd(lr, da1, da2, img, a1)
+                elif optimizer == "sgd_momentum":
+                    self._update_parameters_sgd_momentum(lr, da1, da2, img, a1, v_w1, v_w2, v_b1, v_b2, momentum)
+
                 #the total number of iterations of the training loop is the number of images * epochs
                 #imgCycle is the current image training cycle within the greater for-loop of epochs
                 overallCycleNum = (numImages * epoch) + imgCycle
@@ -203,17 +222,42 @@ class NeuralNetwork():
         print("overallCycleNum: ", overallCycleNum)
         gradients = np.array([layer1Grads, layer2Grads, w1Mags, w2Mags, a1Log, a2Log])
         return gradients
-        
+    
+    def _update_parameters_sgd(self, lr, da1, da2, img, a1):
+        self.w2 -= lr * a1.T.dot(da2)
+        self.b2 -= lr * da2
+        self.w1 -= lr * img.dot(da1)
+        self.b1 -= lr * da1
+
+    def _update_parameters_sgd_momentum(self, lr, da1, da2, img, a1, v_w1, v_w2, v_b1, v_b2, momentum):
+        # Update with momentum
+        v_w2 = momentum * v_w2 + lr * a1.T.dot(da2)
+        self.w2 -= v_w2
+
+        v_b2 = momentum * v_b2 + lr * da2
+        self.b2 -= v_b2
+
+        v_w1 = momentum * v_w1 + lr * img.dot(da1)
+        self.w1 -= v_w1
+
+        v_b1 = momentum * v_b1 + lr * da1
+        self.b1 -= v_b1
+    
     def predict(self, x, activationFunc):
         z1 = np.dot(x, self.w1) + self.b1
         a1 = self.activation(z1, activationFunc)
+        a1 = self.dropout(a1, 0.0, is_training=False)  # No dropout during testing
+
         z2 = np.dot(a1, self.w2) + self.b2
         a2 = self.activation(z2, activationFunc)
+        a2 = self.dropout(a2, 0.0, is_training=False)  # No dropout during testing
+
         sm = self.softmax(a2)
         return sm
+    
 
 
-nn = NeuralNetwork()
+# nn = NeuralNetwork(layer_sizes, activation_funcs)
 activationChoice = "1" #input("Choose an activation function\n 1 - Sigmoid\n 2 - ReLU")
 learningRate = 0.13 #input("Enter a learning rate")
 epochs = 5 #input("Enter number of epochs")
@@ -221,9 +265,13 @@ epochs = 5 #input("Enter number of epochs")
 #converts image pixel values from 0 - 255 to 0 - 1 range, avoiding overflow from activation function
 trainingImages = trainingImages / 255 
 
+nn = NeuralNetwork(layer_sizes, activation_funcs)
+
+
 #training returns gradients for plotting graphs
 print("training in progress...")
-gradients = nn.fit(learningRate, epochs, trainingImages, trainingLabels, activationChoice)
+nn.fit(learningRate, epochs, trainingImages, trainingLabels, activationChoice, optimizer="sgd")
+# gradients = nn.fit(learningRate, epochs, trainingImages, trainingLabels, activationChoice)
 print("training complete")
 
 while True:
@@ -232,7 +280,7 @@ while True:
     print("prediction: ", yHat[index].argmax(), " | ", yHat[index])
     print("actual: ", trainingLabels[index], " | ", nn.oneHotEncode(trainingLabels)[index])
 
-
+# asda
 
 '''
 Trying to match with example Lab solution, trying to do all images at once instead of loop method
