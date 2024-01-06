@@ -297,6 +297,7 @@ nn = NeuralNetwork([786,16,10],"1")
 activationChoice = "1" #input("Choose an activation function\n 1 - Sigmoid\n 2 - ReLU")
 learningRate = 0.2 #input("Enter a learning rate")
 epochs = 2 #input("Enter number of epochs")
+dropout_rate=0.5 #updating dropout rate
 
 #converts image pixel values from 0 - 255 to 0 - 1 range, avoiding overflow from activation function
 trainingImages = trainingImages / 255 
